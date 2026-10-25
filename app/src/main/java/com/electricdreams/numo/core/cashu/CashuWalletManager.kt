@@ -22,6 +22,8 @@ import org.cashudevkit.WalletRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.cashudevkit.WalletSqliteDatabase
 import org.cashudevkit.WalletStore
 import org.cashudevkit.generateMnemonic
@@ -72,6 +74,7 @@ object CashuWalletManager : MintManager.MintChangeListener {
 
     lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val rebuildMutex = Mutex()
 
     @Volatile
     private var database: WalletStore? = null
@@ -620,7 +623,12 @@ object CashuWalletManager : MintManager.MintChangeListener {
      * Rebuild wallet + database using the provided mint URLs.
      * Runs on our IO coroutine scope.
      */
-    private suspend fun rebuildWallet(mints: List<String>) {
+    private suspend fun rebuildWallet(mints: List<String>) = rebuildMutex.withLock {
+        // Rebuilds overlap during onboarding; serialize so the last one sees the full unit cache.
+        rebuildWalletLocked(mints)
+    }
+
+    private suspend fun rebuildWalletLocked(mints: List<String>) {
         _walletState.value = WalletState.LOADING
         try {
             // Close any previous instances
